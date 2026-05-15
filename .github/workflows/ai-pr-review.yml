@@ -107,7 +107,7 @@ jobs:
           head_ref: ${{ github.event.pull_request.head.ref }}
 
           run_go_checks: "false"
-          post_comment: "false"
+          post_comment: "true"
 
           extra_prompt: |
             Проверь PR diff как senior reviewer.
