@@ -1,0 +1,136 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show GitHub context
+        shell: bash
+        run: |
+          echo "event_name=${{ github.event_name }}"
+          echo "repository=${{ github.repository }}"
+          echo "ref=${{ github.ref }}"
+          echo "head_ref=${{ github.head_ref }}"
+          echo "base_ref=${{ github.base_ref }}"
+          echo "sha=${{ github.sha }}"
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "PR number=${{ github.event.pull_request.number }}"
+            echo "Base ref=${{ github.event.pull_request.base.ref }}"
+            echo "Head ref=${{ github.event.pull_request.head.ref }}"
+            echo "Base sha=${{ github.event.pull_request.base.sha }}"
+            echo "Head sha=${{ github.event.pull_request.head.sha }}"
+          fi
+
+      - name: Prepare diff
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Event: ${GITHUB_EVENT_NAME}"
+          echo "Repository: ${GITHUB_REPOSITORY}"
+
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+            echo "Base SHA: ${BASE_SHA}"
+            echo "Head SHA: ${HEAD_SHA}"
+
+            git fetch origin "${BASE_SHA}" --depth=1 || true
+            git fetch origin "${HEAD_SHA}" --depth=1 || true
+
+            echo "Changed files:"
+            git diff --name-status "${BASE_SHA}" "${HEAD_SHA}" | tee changed-files.txt
+
+            echo "Creating PR diff..."
+            git diff \
+              --find-renames \
+              --find-copies \
+              "${BASE_SHA}" "${HEAD_SHA}" \
+              > pr.diff
+          else
+            echo "workflow_dispatch fallback: diff HEAD~1..HEAD"
+
+            echo "Changed files:"
+            git diff --name-status HEAD~1 HEAD | tee changed-files.txt || true
+
+            echo "Creating fallback diff..."
+            git diff \
+              --find-renames \
+              --find-copies \
+              HEAD~1 HEAD \
+              > pr.diff || true
+          fi
+
+          echo "Diff size:"
+          wc -c pr.diff || true
+
+          echo "Diff preview:"
+          sed -n '1,120p' pr.diff || true
+
+          echo "diff_file=pr.diff" >> "$GITHUB_OUTPUT"
+          echo "changed_files_file=changed-files.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Run AI PR Review
+        uses: ./.github/actions/ai-pr-review
+        with:
+          diff_file: ${{ steps.diff.outputs.diff_file }}
+          changed_files_file: ${{ steps.diff.outputs.changed_files_file }}
+          output_file: review.md
+
+          repository: ${{ github.repository }}
+          pr_number: ${{ github.event.pull_request.number }}
+          base_ref: ${{ github.event.pull_request.base.ref }}
+          head_ref: ${{ github.event.pull_request.head.ref }}
+
+          run_go_checks: "false"
+          post_comment: "false"
+
+          extra_prompt: |
+            Проверь PR diff как senior reviewer.
+
+            Особое внимание:
+            - реальные баги;
+            - безопасность;
+            - обработка ошибок;
+            - совместимость API;
+            - edge cases;
+            - лишние изменения вне цели PR.
+
+            Не переписывай весь код.
+            Не придумывай проблемы.
+            Если всё нормально — напиши коротко, что блокирующих замечаний нет.
+
+            Ответ дай как markdown-комментарий для Pull Request.
+        env:
+          YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print review
+        shell: bash
+        run: |
+          echo "== review.md =="
+          cat review.md
