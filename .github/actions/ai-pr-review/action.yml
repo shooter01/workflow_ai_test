@@ -1,0 +1,115 @@
+name: "AI PR Review"
+description: "Run Qwen Code against PR diff and optionally post GitHub PR comment"
+
+inputs:
+  diff_file:
+    description: "Path to PR diff file"
+    required: true
+
+  changed_files_file:
+    description: "Path to changed files list"
+    required: false
+    default: "changed-files.txt"
+
+  output_file:
+    description: "Path to generated review markdown"
+    required: false
+    default: "review.md"
+
+  repository:
+    description: "Repository in owner/repo format"
+    required: true
+
+  pr_number:
+    description: "Pull request number"
+    required: false
+    default: ""
+
+  base_ref:
+    description: "Base branch"
+    required: false
+    default: ""
+
+  head_ref:
+    description: "Head branch"
+    required: false
+    default: ""
+
+  qwen_cli_version:
+    description: "Qwen Code CLI version"
+    required: false
+    default: "latest"
+
+  model_id:
+    description: "Yandex AI Studio model id"
+    required: false
+    default: "gpt://b1g0fdc0s8egb0178g1n/qwen3-235b-a22b-fp8/latest"
+
+  base_url:
+    description: "OpenAI-compatible API base URL"
+    required: false
+    default: "https://llm.api.cloud.yandex.net/v1"
+
+  run_go_checks:
+    description: "Ask Qwen to run go test ./... and go vet ./..."
+    required: false
+    default: "false"
+
+  post_comment:
+    description: "Post review as GitHub PR comment"
+    required: false
+    default: "false"
+
+  extra_prompt:
+    description: "Additional custom instructions"
+    required: false
+    default: ""
+
+outputs:
+  review_file:
+    description: "Generated review file"
+    value: ${{ steps.run.outputs.review_file }}
+
+  review_summary:
+    description: "Short review summary"
+    value: ${{ steps.run.outputs.review_summary }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Install Qwen Code
+      shell: bash
+      env:
+        INPUT_QWEN_CLI_VERSION: ${{ inputs.qwen_cli_version }}
+      run: |
+        set -euo pipefail
+        npm install -g "@qwen-code/qwen-code@${INPUT_QWEN_CLI_VERSION}"
+        qwen --version
+
+    - name: Run AI PR Review
+      id: run
+      shell: bash
+      env:
+        INPUT_DIFF_FILE: ${{ inputs.diff_file }}
+        INPUT_CHANGED_FILES_FILE: ${{ inputs.changed_files_file }}
+        INPUT_OUTPUT_FILE: ${{ inputs.output_file }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+        INPUT_BASE_REF: ${{ inputs.base_ref }}
+        INPUT_HEAD_REF: ${{ inputs.head_ref }}
+        INPUT_MODEL_ID: ${{ inputs.model_id }}
+        INPUT_BASE_URL: ${{ inputs.base_url }}
+        INPUT_RUN_GO_CHECKS: ${{ inputs.run_go_checks }}
+        INPUT_POST_COMMENT: ${{ inputs.post_comment }}
+        INPUT_EXTRA_PROMPT: ${{ inputs.extra_prompt }}
+
+        YANDEX_API_KEY: ${{ env.YANDEX_API_KEY }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+      run: |
+        chmod +x "${{ github.action_path }}/run.sh"
+        "${{ github.action_path }}/run.sh"
